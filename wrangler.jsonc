@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "travel-payout-hotels",
+  "compatibility_date": "2026-04-13",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Cron triggers for price alert checking (every hour)
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+
+  // D1 Database (SQLite) - create with: npx wrangler d1 create travel-payout-production
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "travel-payout-production",
+      "database_id": "placeholder-run-wrangler-d1-create"
+    }
+  ],
+
+  // R2 Storage - for voice audio files & hotel images
+  // Create with: npx wrangler r2 bucket create travel-payout-media
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "travel-payout-media"
+    }
+  ]
+
+  // Secrets (set via: npx wrangler pages secret put SECRET_NAME)
+  // TRAVELPAYOUTS_API_KEY = 140003fe70f6a86ab4b3d538bafb7c42
+  // TRAVELPAYOUTS_MARKER  = 314682
+  // LAOZHANG_API_KEY      = <your-laozhang-key>
+  // ELEVENLABS_API_KEY    = <your-elevenlabs-key>
+  // STRIPE_SECRET_KEY     = sk_live_...
+  // STRIPE_WEBHOOK_SECRET = whsec_...
+  // WHOP_API_KEY          = <your-whop-key>
+  // WHOP_WEBHOOK_SECRET   = <your-whop-webhook-secret>
+  // JWT_SECRET            = <random-256-bit-string>
+  // RESEND_API_KEY        = re_...
+  // GOOGLE_PLACES_API_KEY = <your-google-places-key>
+}
