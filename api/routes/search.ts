@@ -12,7 +12,8 @@ type Variables = { user: any }
 const search = new Hono<{ Bindings: CloudflareBindings; Variables: Variables }>()
 
 // POST /api/search - main hotel search with D1 caching
-search.post('/', requireAuth, checkSearchLimit, async (c) => {
+// optionalAuth so guests can browse without logging in
+search.post('/', optionalAuth, async (c) => {
   try {
     const body = await c.req.json<{
       location: string

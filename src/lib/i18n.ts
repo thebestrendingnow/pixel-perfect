@@ -48,6 +48,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: "Hey! 👋 I'm your AI hotel finder. Tell me what you need — city, budget, parking, late check-in — and I'll find the best match. Perfect for drivers on the road!",
     askAboutHotels: 'Ask about hotels...',
     priceTip: 'Prices may vary by dates, room type, and cancellation policy. Always check final price before booking.',
+    showingNearby: 'Showing hotels near',
   },
   es: {
     heroTitle: 'Encuentra Tu',
@@ -79,6 +80,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: '¡Hola! 👋 Soy tu buscador de hoteles con IA. Dime qué necesitas — ciudad, presupuesto, estacionamiento — ¡y encontraré la mejor opción!',
     askAboutHotels: 'Pregunta sobre hoteles...',
     priceTip: 'Los precios pueden variar según fechas, tipo de habitación y política de cancelación.',
+    showingNearby: 'Mostrando hoteles cerca de',
   },
   fr: {
     heroTitle: 'Trouvez Votre',
@@ -110,6 +112,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: 'Salut ! 👋 Je suis votre assistant IA pour trouver des hôtels. Dites-moi ce que vous cherchez !',
     askAboutHotels: 'Posez une question sur les hôtels...',
     priceTip: 'Les prix peuvent varier selon les dates, le type de chambre et la politique d\'annulation.',
+    showingNearby: 'Hôtels près de',
   },
   de: {
     heroTitle: 'Finden Sie Ihren',
@@ -141,6 +144,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: 'Hallo! 👋 Ich bin Ihr KI-Hotelsucher. Sagen Sie mir, was Sie brauchen!',
     askAboutHotels: 'Fragen Sie nach Hotels...',
     priceTip: 'Preise können je nach Datum, Zimmertyp und Stornierungsbedingungen variieren.',
+    showingNearby: 'Hotels in der Nähe von',
   },
   pt: {
     heroTitle: 'Encontre Sua',
@@ -172,6 +176,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: 'Olá! 👋 Sou seu buscador de hotéis com IA. Me diga o que precisa!',
     askAboutHotels: 'Pergunte sobre hotéis...',
     priceTip: 'Preços podem variar por datas, tipo de quarto e política de cancelamento.',
+    showingNearby: 'Hotéis perto de',
   },
   ja: {
     heroTitle: 'あなたの理想の',
@@ -203,6 +208,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: 'こんにちは！👋 AIホテルファインダーです。何をお探しですか？',
     askAboutHotels: 'ホテルについて質問...',
     priceTip: '価格は日程、部屋タイプ、キャンセルポリシーにより異なる場合があります。',
+    showingNearby: '近くのホテル',
   },
   zh: {
     heroTitle: '找到您的完美',
@@ -234,6 +240,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: '你好！👋 我是AI酒店搜索助手。告诉我你需要什么！',
     askAboutHotels: '询问酒店...',
     priceTip: '价格可能因日期、房型和取消政策而异。',
+    showingNearby: '附近的酒店',
   },
   ar: {
     heroTitle: 'اعثر على',
@@ -265,6 +272,7 @@ const translations: Record<Locale, Record<string, string>> = {
     aiGreeting: 'مرحبا! 👋 أنا مساعدك الذكي للبحث عن الفنادق. أخبرني بما تحتاج!',
     askAboutHotels: 'اسأل عن الفنادق...',
     priceTip: 'قد تختلف الأسعار حسب التواريخ ونوع الغرفة وسياسة الإلغاء.',
+    showingNearby: 'فنادق قريبة من',
   },
 };
 

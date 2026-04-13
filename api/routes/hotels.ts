@@ -14,22 +14,31 @@ const hotels = new Hono<{ Bindings: CloudflareBindings; Variables: Variables }>(
 // GET /api/hotels/trending — top rated hotels for homepage hero
 // Lovable's Index.tsx can show these before any search
 hotels.get('/trending', optionalAuth, async (c) => {
-  const limit = parseInt(c.req.query('limit') || '8')
+  const limit = parseInt(c.req.query('limit') || '20')
   const currency = c.req.query('currency') || 'USD'
+  const country = c.req.query('country') || ''
 
-  const { results } = await c.env.DB.prepare(`
+  let query = `
     SELECT id, travelpayouts_id, name, location, city, country,
            stars, rating, review_count, price, currency,
            image_url, affiliate_link, latitude, longitude,
            has_parking, has_truck_parking, is_family_friendly,
            amenities, expires_at
     FROM hotel_cache
-    WHERE rating >= 7.0
-      AND price IS NOT NULL
+    WHERE price IS NOT NULL
       AND image_url IS NOT NULL
-    ORDER BY (rating * 0.6 + COALESCE(review_count, 0) * 0.001) DESC
-    LIMIT ?
-  `).bind(limit).all<any>()
+  `
+  const bindings: any[] = []
+
+  if (country) {
+    query += ` AND (LOWER(country) LIKE ? OR LOWER(country) LIKE ?)`
+    bindings.push(`%${country.toLowerCase()}%`, `%${country.toLowerCase()}%`)
+  }
+
+  query += ` ORDER BY (COALESCE(rating, 7.0) * 0.6 + COALESCE(review_count, 0) * 0.001) DESC LIMIT ?`
+  bindings.push(limit)
+
+  const { results } = await c.env.DB.prepare(query).bind(...bindings).all<any>()
 
   return c.json({
     hotels: results.map(h => ({
@@ -38,6 +47,68 @@ hotels.get('/trending', optionalAuth, async (c) => {
       is_trending: true
     })),
     count: results.length
+  })
+})
+
+// GET /api/hotels/by-country?country=NL — hotels filtered by country code or name
+// Used by frontend on initial load after IP detection
+hotels.get('/by-country', optionalAuth, async (c) => {
+  const country = c.req.query('country') || 'US'
+  const limit = parseInt(c.req.query('limit') || '20')
+
+  // Map 2-letter country codes to full names for DB lookup
+  const COUNTRY_NAMES: Record<string, string[]> = {
+    NL: ['Netherlands', 'Nederland'],
+    DE: ['Germany', 'Deutschland'],
+    FR: ['France'],
+    ES: ['Spain', 'España'],
+    IT: ['Italy', 'Italia'],
+    GB: ['United Kingdom', 'UK', 'England'],
+    US: ['United States', 'USA'],
+    BE: ['Belgium', 'Belgique'],
+    AT: ['Austria', 'Österreich'],
+    PT: ['Portugal'],
+    CH: ['Switzerland', 'Schweiz'],
+    SE: ['Sweden', 'Sverige'],
+    NO: ['Norway', 'Norge'],
+    DK: ['Denmark', 'Danmark'],
+    PL: ['Poland', 'Polska'],
+    CZ: ['Czech Republic', 'Czechia'],
+    HU: ['Hungary'],
+    JP: ['Japan'],
+    CN: ['China'],
+    AU: ['Australia'],
+    CA: ['Canada'],
+    BR: ['Brazil', 'Brasil'],
+    MX: ['Mexico', 'México'],
+  }
+
+  const names = COUNTRY_NAMES[country.toUpperCase()] || [country]
+  const placeholders = names.map(() => 'LOWER(country) LIKE ?').join(' OR ')
+  const bindings = names.map(n => `%${n.toLowerCase()}%`)
+
+  const { results } = await c.env.DB.prepare(`
+    SELECT id, travelpayouts_id, name, location, city, country,
+           stars, rating, review_count, price, currency,
+           image_url, affiliate_link, latitude, longitude,
+           has_parking, has_truck_parking, is_family_friendly,
+           amenities
+    FROM hotel_cache
+    WHERE (${placeholders})
+      AND price IS NOT NULL
+      AND image_url IS NOT NULL
+    ORDER BY (COALESCE(rating, 7.0) * 0.6 + COALESCE(review_count, 0) * 0.001) DESC
+    LIMIT ?
+  `).bind(...bindings, limit).all<any>()
+
+  return c.json({
+    hotels: results.map(h => ({
+      ...h,
+      amenities: tryParseJSON(h.amenities, []),
+    })),
+    count: results.length,
+    country_code: country.toUpperCase(),
+    country_names: names,
   })
 })
 
