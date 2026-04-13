@@ -19,6 +19,9 @@ import bookingsRoutes from './routes/bookings'
 import webhooksRoutes from './routes/webhooks'
 import adminRoutes    from './routes/admin'
 import pricesRoutes   from './routes/prices'
+import localeRoutes   from './routes/locale'
+import hotelsRoutes   from './routes/hotels'
+import { getSiteConfig } from './lib/config'
 
 type Variables = { user: any }
 
@@ -75,6 +78,15 @@ app.route('/api/bookings',  bookingsRoutes)
 app.route('/api/webhook',   webhooksRoutes)
 app.route('/api/admin',     adminRoutes)
 app.route('/api/prices',    pricesRoutes)
+app.route('/api/locale',    localeRoutes)
+app.route('/api/hotels',    hotelsRoutes)
+
+// ─── White-Label Config (Lovable fetches this on startup) ────
+// Lovable's App.tsx calls GET /api/config to get branding + feature flags
+app.get('/api/config', (c) => {
+  const config = getSiteConfig(c.env)
+  return c.json(config)
+})
 
 // ─── API Docs ────────────────────────────────────────────────
 app.get('/api', (c) => {
@@ -133,6 +145,19 @@ app.get('/api', (c) => {
       webhooks: {
         'POST /api/webhook/stripe': 'Stripe events',
         'POST /api/webhook/whop':   'Whop events'
+      },
+      locale: {
+        'GET /api/locale':           'IP-based locale (country, language, currency) — uses CF-IPCountry header',
+        'GET /api/locale/supported': 'All 13 supported languages'
+      },
+      hotels: {
+        'GET /api/hotels/trending':    'Top rated hotels for homepage hero',
+        'GET /api/hotels/driver-mode': 'Parking + budget hotels for drivers',
+        'GET /api/hotels/nearby':      'Geo-based hotel search (lat, lon, radius_km)',
+        'GET /api/hotels/map-markers': 'Lightweight markers for Leaflet map'
+      },
+      config: {
+        'GET /api/config': 'White-label site config (name, colors, features) from env vars'
       }
     },
     tiers: {

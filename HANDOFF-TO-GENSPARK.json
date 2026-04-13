@@ -1,7 +1,8 @@
 {
-  "project": "Travel Payout Hotel Finder",
-  "version": "1.0.0",
-  "stack": "Hono + Cloudflare Workers + D1 + R2 — NO Supabase",
+  "project": "Travel AI PFR — Hotel Finder",
+  "version": "2.0.0",
+  "last_updated": "2026-04-13",
+  "stack": "Hono + Cloudflare Workers + D1 + R2 — NO Supabase — Pure Edge",
 
   "repo": {
     "url": "https://github.com/thebestrendingnow/pixel-perfect",
@@ -18,30 +19,43 @@
   },
 
   "backend_completed": [
-    "✅ Hono app on Cloudflare Workers (src/index.tsx)",
+    "✅ Hono 4.x app on Cloudflare Workers (src/index.tsx)",
     "✅ JWT Auth — register, login, /me, profile update (src/routes/auth.ts)",
     "✅ Hotel Search — Travelpayouts API + D1 cache (1hr TTL) (src/routes/search.ts)",
     "✅ Price Comparison — Travelpayouts + Booking.com + Expedia + Hotels.com (src/routes/prices.ts)",
-    "✅ AI Chat JSON — LaoZhang/KIE.ai intent extraction + recommendations (src/routes/chat.ts)",
+    "✅ AI Chat JSON — LaoZhang/KIE.ai intent extraction + hotel recommendations (src/routes/chat.ts)",
     "✅ AI Chat SSE STREAM — token-by-token for AIChatPanel.tsx (POST /api/chat/stream)",
-    "✅ Voice Chat — transcript → hotel search → ElevenLabs TTS → R2 (src/routes/chat.ts)",
+    "✅ Voice Chat — transcript → hotel search → ElevenLabs TTS → R2 audio (src/routes/chat.ts)",
     "✅ Favorites — save/list/remove/check (src/routes/favorites.ts)",
     "✅ Price Alerts — create/list/delete/pause + Resend email (src/routes/alerts.ts)",
-    "✅ Hourly CRON — Cloudflare Cron Trigger checks all active alerts",
+    "✅ Hourly CRON — Cloudflare Cron Trigger checks all active price alerts",
     "✅ Bookings — click tracking + CSV expense export (src/routes/bookings.ts)",
     "✅ Stripe Webhook — subscription tier sync (src/routes/webhooks.ts)",
     "✅ Whop Webhook — membership granted/expired sync (src/routes/webhooks.ts)",
-    "✅ Admin Dashboard — commission stats, monthly breakdown (src/routes/admin.ts)",
-    "✅ Agency Commission Report — full revenue report (src/routes/admin.ts)",
-    "✅ D1 Database — 9 tables, full schema + indexes (migrations/0001_initial_schema.sql)",
-    "✅ R2 Storage — voice audio files keyed by user/message",
+    "✅ Admin Dashboard — commission stats + monthly breakdown (src/routes/admin.ts)",
+    "✅ Agency Commission Report — full revenue report + user list (src/routes/admin.ts)",
+    "✅ D1 Database — 9 tables, fully indexed schema (migrations/0001_initial_schema.sql)",
+    "✅ R2 Storage — voice audio files keyed by user/message ID",
     "✅ Tier gating middleware — free/traveler/business/agency (src/middleware/auth.ts)",
-    "✅ CORS — accepts Lovable preview domains + production",
-    "✅ Rate limiting — 5 searches/day for free tier"
+    "✅ CORS — accepts Lovable preview domains + *.pages.dev + production custom domain",
+    "✅ Rate limiting — 5 searches/day for free tier with daily reset",
+    "✅ IP-based Locale Detection — GET /api/locale using CF-IPCountry header, zero cost",
+    "✅ 13 Language Support — country→language mapping for EN/ES/FR/DE/PT/JA/ZH/AR + more",
+    "✅ Currency Detection — country→ISO 4217 currency for 40+ countries",
+    "✅ White-label Config — GET /api/config returns branding + feature flags from env vars",
+    "✅ Trending Hotels — GET /api/hotels/trending for homepage hero (rating-weighted sort)",
+    "✅ Driver Mode Hotels — GET /api/hotels/driver-mode (parking, budget, highway access)",
+    "✅ Geo-nearby Hotels — GET /api/hotels/nearby (lat/lon bounding box + haversine)",
+    "✅ Map Markers — GET /api/hotels/map-markers (lightweight, Leaflet-optimised payload)",
+    "✅ .env.example — all 25+ env vars documented with descriptions",
+    "✅ One-command setup — full deploy script in README"
   ],
 
   "api_endpoints": {
-    "health":   "GET  /api/health",
+    "health":  "GET  /api/health",
+    "config":  "GET  /api/config   ← Lovable App.tsx calls on startup for branding + feature flags",
+    "locale":  "GET  /api/locale   ← i18n.ts calls for IP-based language + currency",
+    "locale_supported": "GET /api/locale/supported ← list of 13 supported languages",
     "auth": [
       "POST /api/auth/register",
       "POST /api/auth/login",
@@ -57,9 +71,9 @@
       "POST /api/prices/compare"
     ],
     "chat": [
-      "POST /api/chat/stream   ← SSE for AIChatPanel.tsx",
-      "POST /api/chat/send     ← JSON alternative",
-      "POST /api/chat/voice    ← ElevenLabs TTS",
+      "POST /api/chat/stream   ← SSE for AIChatPanel.tsx (text/event-stream)",
+      "POST /api/chat/send     ← JSON alternative for AIChatPanel.tsx",
+      "POST /api/chat/voice    ← voice transcript → ElevenLabs TTS audio",
       "GET  /api/chat/threads",
       "GET  /api/chat/threads/:id",
       "DELETE /api/chat/threads/:id"
@@ -80,7 +94,13 @@
       "GET  /api/bookings",
       "POST /api/bookings",
       "GET  /api/bookings/:id",
-      "GET  /api/bookings/export  (CSV, business+)"
+      "GET  /api/bookings/export  (CSV, business+ only)"
+    ],
+    "hotels": [
+      "GET /api/hotels/trending",
+      "GET /api/hotels/driver-mode",
+      "GET /api/hotels/nearby?lat=&lon=&radius_km=",
+      "GET /api/hotels/map-markers?bounds=sw_lat,sw_lon,ne_lat,ne_lon"
     ],
     "admin": [
       "GET /api/admin/dashboard",
@@ -94,93 +114,241 @@
   },
 
   "lovable_integration": {
-    "AIChatPanel_endpoint": "POST /api/chat/stream",
-    "AIChatPanel_type": "SSE (text/event-stream)",
-    "AIChatPanel_events": {
-      "thread_id": "{ type: 'thread_id', thread_id: string }",
-      "hotels":    "{ type: 'hotels', hotels: Hotel[] }",
-      "token":     "{ type: 'token', token: string }",
-      "done":      "{ type: 'done', thread_id: string }",
-      "error":     "{ type: 'error', error: string }"
+    "startup_call": "App.tsx → GET /api/config → sets site_name, colors, feature flags",
+    "i18n_call": "i18n.ts → GET /api/locale → sets language, currency, rtl, show_driver_features",
+
+    "AIChatPanel": {
+      "endpoint": "POST /api/chat/stream",
+      "type": "SSE (text/event-stream)",
+      "auth": "Authorization: Bearer <JWT>",
+      "events": {
+        "thread_id": "{ type: 'thread_id', thread_id: string }",
+        "hotels": "{ type: 'hotels', hotels: Hotel[] }",
+        "token": "{ type: 'token', token: string }  ← append to chat bubble",
+        "done": "{ type: 'done', thread_id: string }",
+        "error": "{ type: 'error', error: string }"
+      },
+      "tier_required": "traveler"
     },
-    "PriceComparisonTable_endpoint": "POST /api/prices/compare",
-    "PriceComparisonTable_request": {
-      "hotel_id": "string",
-      "check_in": "YYYY-MM-DD",
-      "check_out": "YYYY-MM-DD",
-      "guests": "number",
-      "currency": "USD"
+
+    "PriceComparisonTable": {
+      "endpoint": "POST /api/prices/compare",
+      "request_body": {
+        "hotel_id": "string",
+        "check_in": "YYYY-MM-DD (optional)",
+        "check_out": "YYYY-MM-DD (optional)",
+        "guests": "number (default 2)",
+        "currency": "USD"
+      },
+      "response": {
+        "hotel_id": "string",
+        "hotel_name": "string",
+        "prices": [
+          {
+            "provider": "Travelpayouts | Booking.com | Expedia | Hotels.com",
+            "price": "number",
+            "currency": "string",
+            "is_best_price": "boolean",
+            "discount_pct": "number",
+            "book_url": "string (affiliate link)",
+            "is_refundable": "boolean",
+            "includes_breakfast": "boolean"
+          }
+        ],
+        "best_price": "number",
+        "best_provider": "string"
+      },
+      "tier_required": "free"
     },
-    "PriceComparisonTable_response": {
-      "hotel_id": "string",
-      "hotel_name": "string",
-      "prices": [
-        {
-          "provider": "Travelpayouts | Booking.com | Expedia | Hotels.com",
-          "price": "number",
-          "currency": "string",
-          "is_best_price": "boolean",
-          "discount_pct": "number",
-          "book_url": "string",
-          "is_refundable": "boolean",
-          "includes_breakfast": "boolean"
-        }
-      ],
-      "best_price": "number",
-      "best_provider": "string"
+
+    "MapView": {
+      "markers_endpoint": "GET /api/hotels/map-markers?bounds=sw_lat,sw_lon,ne_lat,ne_lon",
+      "nearby_endpoint": "GET /api/hotels/nearby?lat=&lon=&radius_km=50",
+      "marker_fields": ["id", "tp_id", "name", "city", "lat", "lon", "price", "currency", "stars", "rating", "has_parking", "image", "book_url"]
     },
-    "auth_header": "Authorization: Bearer <JWT>",
-    "cors": "Accepts *.lovable.app, *.lovableproject.com, *.pages.dev"
+
+    "FilterSidebar": {
+      "driver_mode_endpoint": "GET /api/hotels/driver-mode?max_price=90&city=NYC",
+      "search_endpoint": "POST /api/search",
+      "search_body": {
+        "location": "string",
+        "check_in": "YYYY-MM-DD",
+        "check_out": "YYYY-MM-DD",
+        "guests": "number",
+        "stars": "number (1-5)",
+        "max_price": "number",
+        "has_parking": "boolean",
+        "has_truck_parking": "boolean",
+        "is_family_friendly": "boolean",
+        "currency": "string",
+        "language": "string"
+      }
+    },
+
+    "VoiceChat": {
+      "endpoint": "POST /api/chat/voice",
+      "request": "{ transcript: string, language?: string }",
+      "response": {
+        "voice_id": "string",
+        "transcript": "string",
+        "response_text": "string",
+        "audio_url": "string (R2 signed URL, expires 1hr)",
+        "hotels": "Hotel[] (up to 3 recommendations)",
+        "intent": "string",
+        "location": "string"
+      },
+      "tier_required": "traveler"
+    },
+
+    "auth_header": "Authorization: Bearer <JWT from POST /api/auth/login>",
+    "cors": "Accepts *.lovable.app, *.lovableproject.com, *.pages.dev, *.workers.dev, localhost:5173"
+  },
+
+  "whitelabel_config_response": {
+    "endpoint": "GET /api/config",
+    "auth": "public (no JWT needed)",
+    "response_shape": {
+      "site_name": "string",
+      "site_tagline": "string",
+      "site_url": "string",
+      "logo_url": "string",
+      "favicon_url": "string",
+      "color_primary": "#2d8a9e",
+      "color_secondary": "#0c2340",
+      "color_accent": "#5cbdb9",
+      "color_bg_dark": "#0c2340",
+      "travelpayouts_marker": "314682",
+      "show_driver_mode": true,
+      "show_voice_chat": true,
+      "show_price_comparison": true,
+      "show_map": true,
+      "support_email": "string",
+      "privacy_url": "string",
+      "terms_url": "string",
+      "twitter_url": "string",
+      "instagram_url": "string"
+    },
+    "env_vars_to_override": [
+      "SITE_NAME", "SITE_TAGLINE", "SITE_URL", "LOGO_URL", "FAVICON_URL",
+      "COLOR_PRIMARY", "COLOR_SECONDARY", "COLOR_ACCENT", "COLOR_BG_DARK",
+      "SUPPORT_EMAIL", "PRIVACY_URL", "TERMS_URL", "TWITTER_URL", "INSTAGRAM_URL",
+      "SHOW_DRIVER_MODE", "SHOW_VOICE_CHAT", "SHOW_PRICE_COMPARISON", "SHOW_MAP"
+    ]
+  },
+
+  "locale_detection": {
+    "endpoint": "GET /api/locale",
+    "auth": "public",
+    "mechanism": "Cloudflare CF-IPCountry header — zero cost, no external API",
+    "response_shape": {
+      "country": "US",
+      "city": "New York",
+      "language": "en",
+      "currency": "USD",
+      "timezone": "America/New_York",
+      "rtl": false,
+      "high_driver_market": true,
+      "frontend_config": {
+        "locale": "en",
+        "currency": "USD",
+        "rtl": false,
+        "show_driver_features": true
+      }
+    },
+    "supported_languages": ["en", "es", "fr", "de", "pt", "ja", "zh", "ar", "nl", "hi", "ur", "pap", "srn"]
   },
 
   "d1_schema_tables": [
-    "users",
-    "hotel_cache",
-    "favorites",
-    "price_alerts",
-    "bookings",
-    "chat_threads",
-    "chat_messages",
-    "voice_messages",
-    "whop_subscriptions",
-    "expense_reports"
+    "users — id, email, name, password_hash, subscription_tier, stripe_customer_id, whop_user_id, preferred_language, preferred_currency, search_count_today, search_count_reset_at",
+    "hotel_cache — id, travelpayouts_id, name, location, city, country, stars, rating, price, currency, image_url, amenities (JSON), lat, lon, affiliate_link, has_parking, has_truck_parking, highway_access, is_family_friendly, cached_at, expires_at",
+    "favorites — id, user_id, hotel_id, added_at",
+    "price_alerts — id, user_id, hotel_id, hotel_name, target_price, current_price, currency, check_in, check_out, status (active|triggered|expired|paused)",
+    "bookings — id, user_id, hotel_id, hotel_name, check_in, check_out, guests, rooms, total_price, currency, commission_earned, status, affiliate_link",
+    "chat_threads — id, user_id, title, message_count, last_message_at",
+    "chat_messages — id, thread_id, user_id, role (user|assistant|system), content, hotel_ids (JSON), intent, language",
+    "voice_messages — id, user_id, thread_id, transcript, response_text, audio_url, hotels_recommended (JSON), language",
+    "whop_subscriptions — id, user_id, whop_user_id, membership_id, plan_id, tier (traveler|business|agency), status, started_at, expires_at"
   ],
 
   "environment_variables": {
     "TRAVELPAYOUTS_API_KEY": "140003fe70f6a86ab4b3d538bafb7c42",
-    "TRAVELPAYOUTS_MARKER":  "314682",
-    "LAOZHANG_API_KEY":      "<your-laozhang-key>",
-    "ELEVENLABS_API_KEY":    "<your-elevenlabs-key>",
-    "STRIPE_SECRET_KEY":     "sk_live_...",
+    "TRAVELPAYOUTS_MARKER": "314682",
+    "LAOZHANG_API_KEY": "<your-laozhang-key>",
+    "ELEVENLABS_API_KEY": "<your-elevenlabs-key>",
+    "STRIPE_SECRET_KEY": "sk_live_...",
     "STRIPE_WEBHOOK_SECRET": "whsec_...",
-    "WHOP_API_KEY":          "<your-whop-key>",
-    "WHOP_WEBHOOK_SECRET":   "<your-whop-webhook-secret>",
-    "JWT_SECRET":            "<random-256-bit-string>",
-    "RESEND_API_KEY":        "re_..."
+    "WHOP_API_KEY": "<your-whop-key>",
+    "WHOP_WEBHOOK_SECRET": "<your-whop-webhook-secret>",
+    "JWT_SECRET": "<random-256-bit-string>",
+    "RESEND_API_KEY": "re_...",
+    "GOOGLE_PLACES_API_KEY": "<optional>",
+    "AMADEUS_CLIENT_ID": "<optional>",
+    "AMADEUS_CLIENT_SECRET": "<optional>",
+    "SITE_NAME": "Travel AI PFR (white-label)",
+    "COLOR_PRIMARY": "#2d8a9e (white-label)",
+    "SHOW_DRIVER_MODE": "true (feature toggle)"
   },
 
-  "deploy_commands": [
+  "one_command_setup": [
+    "git clone https://github.com/thebestrendingnow/pixel-perfect.git",
+    "cd pixel-perfect",
     "npm install",
+    "cp .env.example .dev.vars",
+    "# Edit .dev.vars — fill in your API keys",
     "npx wrangler d1 create travel-payout-production",
-    "# Copy database_id to wrangler.jsonc",
+    "# Copy database_id into wrangler.jsonc",
     "npx wrangler r2 bucket create travel-payout-media",
+    "npm run db:migrate:local",
+    "npm run db:seed",
     "npm run build",
-    "npx wrangler d1 migrations apply travel-payout-production",
-    "npm run deploy",
-    "npx wrangler pages secret put TRAVELPAYOUTS_API_KEY --project-name travel-payout-hotels",
-    "npx wrangler pages secret put JWT_SECRET --project-name travel-payout-hotels",
-    "# ... add all other secrets"
+    "pm2 start ecosystem.config.cjs",
+    "# Visit http://localhost:3000"
   ],
 
-  "subscription_revenue": {
-    "model": "Affiliate commissions (25-40%) + SaaS subscriptions",
-    "conservative_year1": "$72,000",
-    "aggressive_year2": "$1,050,000",
-    "tiers": {
-      "free":     "$0/mo  — 5 searches/day",
-      "traveler": "$9.99/mo — Unlimited + AI + Voice + 3 alerts",
-      "business": "$24.99/mo — + Expense export + 10 alerts",
-      "agency":   "$99.99/mo — + API + White-label + Unlimited"
+  "production_deploy": [
+    "npm run build",
+    "npx wrangler d1 migrations apply travel-payout-production",
+    "npx wrangler pages deploy dist --project-name travel-payout-hotels",
+    "npx wrangler pages secret put TRAVELPAYOUTS_API_KEY --project-name travel-payout-hotels",
+    "npx wrangler pages secret put JWT_SECRET --project-name travel-payout-hotels",
+    "# ... add all other secrets from .env.example"
+  ],
+
+  "revenue_model": {
+    "affiliate_commissions": "25-40% per booking via Travelpayouts affiliate (marker 314682)",
+    "avg_commission_per_booking": "$60 (based on $150/night stay)",
+    "subscriptions": {
+      "free": "$0/mo — 5 searches/day",
+      "traveler": "$9.99/mo — unlimited + AI + Voice + 3 alerts",
+      "business": "$24.99/mo — + expense export + 10 alerts",
+      "agency": "$99.99/mo — + API access + white-label + unlimited"
+    },
+    "revenue_projections": {
+      "conservative_year1": "$72,000 (500 users, 100 bookings/month)",
+      "aggressive_year2": "$1,050,000 (5,000 users, 1,250 bookings/month)"
     }
+  },
+
+  "flippa_assets": {
+    "selling_points": [
+      "Fully functional hotel search SaaS with affiliate revenue built-in",
+      "Travelpayouts credentials included (marker 314682) — start earning day 1",
+      "Pure Cloudflare edge stack — ~$5/mo hosting at scale",
+      "White-label ready — change brand in env vars only, no code changes",
+      "13-language support with IP-based auto-detection",
+      "AI Chat (LaoZhang/KIE.ai) + Voice TTS (ElevenLabs) built-in",
+      "Price comparison across 4 providers (Travelpayouts, Booking, Expedia, Hotels.com)",
+      "Driver Mode — unique niche feature for delivery/truck drivers",
+      "Stripe + Whop subscription billing wired and working",
+      "D1 SQLite + R2 storage — no external database cost",
+      "Cron-based price alerts with Resend email delivery",
+      "One-command setup — buyer can be live in under 30 minutes"
+    ],
+    "tech_stack_no_monthly_cost": [
+      "Cloudflare Workers (free tier: 100k req/day)",
+      "Cloudflare D1 (free tier: 5M rows/month)",
+      "Cloudflare R2 (free tier: 10GB storage)",
+      "Cloudflare Pages (free hosting)"
+    ]
   }
 }

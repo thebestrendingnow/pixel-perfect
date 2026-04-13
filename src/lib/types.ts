@@ -184,4 +184,23 @@ export type CloudflareBindings = {
   GOOGLE_PLACES_API_KEY: string
   AMADEUS_CLIENT_ID: string
   AMADEUS_CLIENT_SECRET: string
+  // White-label env vars (all optional — have defaults)
+  SITE_NAME: string
+  SITE_TAGLINE: string
+  SITE_URL: string
+  LOGO_URL: string
+  FAVICON_URL: string
+  COLOR_PRIMARY: string
+  COLOR_SECONDARY: string
+  COLOR_ACCENT: string
+  COLOR_BG_DARK: string
+  SUPPORT_EMAIL: string
+  PRIVACY_URL: string
+  TERMS_URL: string
+  TWITTER_URL: string
+  INSTAGRAM_URL: string
+  SHOW_DRIVER_MODE: string
+  SHOW_VOICE_CHAT: string
+  SHOW_PRICE_COMPARISON: string
+  SHOW_MAP: string
 }
