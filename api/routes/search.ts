@@ -42,11 +42,11 @@ search.post('/', optionalAuth, async (c) => {
     // 1. Check D1 cache first (within last hour for same location)
     let cacheQuery = `
       SELECT * FROM hotel_cache 
-      WHERE LOWER(city) LIKE ? OR LOWER(location) LIKE ?
+      WHERE (LOWER(city) LIKE ? OR LOWER(location) LIKE ? OR LOWER(country) LIKE ?)
         AND expires_at > datetime('now')
     `
     const locationFilter = `%${body.location.toLowerCase()}%`
-    let cacheBindings: any[] = [locationFilter, locationFilter]
+    let cacheBindings: any[] = [locationFilter, locationFilter, locationFilter]
 
     // Apply filters
     const filters: string[] = []
@@ -115,6 +115,17 @@ search.post('/', optionalAuth, async (c) => {
         hotel.has_parking, hotel.has_truck_parking, hotel.highway_access, hotel.is_family_friendly,
         hotel.is_pet_friendly, hotel.has_breakfast, hotel.raw_data, hotel.expires_at
       ).run().catch(() => {}) // Ignore duplicate key errors
+    }
+
+    // If Travelpayouts returned nothing, return whatever is in cache
+    if (normalized.length === 0) {
+      return c.json({
+        hotels: cachedHotels.map(h => ({ ...h, amenities: tryParseJSON(h.amenities, []) })),
+        total: cachedHotels.length,
+        location: body.location,
+        source: 'cache_fallback',
+        affiliate_marker: TRAVELPAYOUTS_MARKER
+      })
     }
 
     // 4. Apply filters & return
