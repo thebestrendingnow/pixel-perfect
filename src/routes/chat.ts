@@ -277,6 +277,196 @@ chat.delete('/threads/:id', requireAuth, async (c) => {
   return c.json({ success: true })
 })
 
+// POST /api/chat/stream — SSE streaming for Lovable's AIChatPanel.tsx
+// Matches the interface Lovable expects from a Supabase edge function
+// but runs 100% on Cloudflare Workers / Hono — NO Supabase
+chat.post('/stream', requireAuth, requireTier('traveler'), async (c) => {
+  try {
+    const { message, thread_id, language } = await c.req.json<{
+      message: string
+      thread_id?: string
+      language?: string
+    }>()
+
+    if (!message?.trim()) {
+      return c.json({ error: 'Message is required' }, 400)
+    }
+
+    const user = c.get('user')
+    const msgLanguage = language || 'en'
+
+    // Get/create thread
+    let threadId = thread_id
+    if (!threadId) {
+      threadId = generateId()
+      await c.env.DB.prepare(
+        'INSERT INTO chat_threads (id, user_id, title) VALUES (?, ?, ?)'
+      ).bind(threadId, user.sub, message.slice(0, 60)).run()
+    }
+
+    // Save user message
+    await c.env.DB.prepare(
+      'INSERT INTO chat_messages (id, thread_id, user_id, role, content, language) VALUES (?, ?, ?, \'user\', ?, ?)'
+    ).bind(generateId(), threadId, user.sub, message, msgLanguage).run()
+
+    // Extract intent for hotel search
+    const intent = await extractIntent(message, c.env.LAOZHANG_API_KEY)
+    let hotelContext = ''
+    let hotels: any[] = []
+
+    if (['search', 'recommend', 'compare'].includes(intent.action) && intent.location) {
+      const rawHotels = await searchHotels({
+        location: intent.location,
+        checkIn: intent.check_in,
+        adults: intent.guests,
+        currency: 'USD',
+        language: msgLanguage,
+        limit: 5,
+        token: c.env.TRAVELPAYOUTS_API_KEY
+      })
+      hotels = rawHotels.map(h => normalizeHotel(h, c.env.TRAVELPAYOUTS_API_KEY))
+      hotelContext = hotels.slice(0, 3).map((h, i) =>
+        `${i + 1}. ${h.name} — $${h.price}/night — ${h.stars}⭐ — ${h.location} — Book: ${h.affiliate_link}`
+      ).join('\n')
+    }
+
+    // Stream SSE response using Cloudflare ReadableStream
+    const { readable, writable } = new TransformStream()
+    const writer = writable.getWriter()
+    const encoder = new TextEncoder()
+
+    // Write SSE helper
+    const writeSSE = async (data: Record<string, any>) => {
+      await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+    }
+
+    // System prompt matching Lovable's hotel assistant context
+    const systemPrompt = `You are a helpful hotel booking assistant for Travel Payout Hotel Finder.
+You understand these traveler types:
+- Business Travelers: fast booking, expense reports, corporate rates
+- Delivery/Truck Drivers: cheap clean rooms, truck parking, highway access, late check-in
+- Couples: romance, spa, reviews, special deals
+- Families: space, pool, kid-friendly, nearby activities
+- Solo Travelers: budget, safety, social options
+
+Always respond in the same language the user writes in. Be concise and helpful.
+When you mention hotels, include prices and booking links.
+${hotelContext ? `\n\nAvailable hotels for this query:\n${hotelContext}` : ''}`
+
+    // Fire the streaming request to LaoZhang/KIE.ai in background
+    ;(async () => {
+      try {
+        const aiRes = await fetch('https://api.laozhang.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${c.env.LAOZHANG_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            stream: true,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: message }
+            ],
+            max_tokens: 500,
+            temperature: 0.7
+          })
+        })
+
+        if (!aiRes.ok || !aiRes.body) {
+          await writeSSE({ error: 'AI unavailable', type: 'error' })
+          await writer.close()
+          return
+        }
+
+        // Send thread_id first so frontend can track conversation
+        await writeSSE({ type: 'thread_id', thread_id: threadId })
+
+        // Send hotels if any
+        if (hotels.length > 0) {
+          await writeSSE({
+            type: 'hotels',
+            hotels: hotels.slice(0, 5).map(h => ({
+              id: h.travelpayouts_id,
+              name: h.name,
+              location: h.location,
+              stars: h.stars,
+              rating: h.rating,
+              price: h.price,
+              currency: h.currency,
+              image_url: h.image_url,
+              affiliate_link: h.affiliate_link,
+              has_parking: !!h.has_parking,
+              has_truck_parking: !!h.has_truck_parking,
+              is_family_friendly: !!h.is_family_friendly
+            }))
+          })
+        }
+
+        // Stream text tokens
+        const reader = aiRes.body.getReader()
+        const dec = new TextDecoder()
+        let fullResponse = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          const chunk = dec.decode(value)
+          const lines = chunk.split('\n').filter(l => l.startsWith('data: '))
+
+          for (const line of lines) {
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') continue
+            try {
+              const parsed = JSON.parse(raw)
+              const token = parsed.choices?.[0]?.delta?.content || ''
+              if (token) {
+                fullResponse += token
+                await writeSSE({ type: 'token', token })
+              }
+            } catch {}
+          }
+        }
+
+        // Save complete assistant message to D1
+        await c.env.DB.prepare(
+          'INSERT INTO chat_messages (id, thread_id, user_id, role, content, hotel_ids, intent, language) VALUES (?, ?, ?, \'assistant\', ?, ?, ?, ?)'
+        ).bind(
+          generateId(), threadId, user.sub, fullResponse,
+          JSON.stringify(hotels.slice(0, 5).map(h => h.travelpayouts_id)),
+          intent.action, msgLanguage
+        ).run()
+
+        await c.env.DB.prepare(
+          'UPDATE chat_threads SET updated_at = datetime(\'now\') WHERE id = ?'
+        ).bind(threadId).run()
+
+        await writeSSE({ type: 'done', thread_id: threadId })
+        await writer.close()
+      } catch (err) {
+        console.error('[SSE stream error]', err)
+        await writeSSE({ type: 'error', error: 'Streaming failed' }).catch(() => {})
+        await writer.close().catch(() => {})
+      }
+    })()
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no'
+      }
+    })
+  } catch (err: any) {
+    console.error('Stream setup error:', err)
+    return c.json({ error: 'Stream setup failed', message: err.message }, 500)
+  }
+})
+
 // GET /api/audio/:path* - serve R2 audio files
 chat.get('/audio/*', requireAuth, async (c) => {
   const key = c.req.path.replace('/api/audio/', '')

@@ -1,6 +1,7 @@
 // ============================================================
-// Travel Payout Hotel Finder - Main App Entry
-// Hono on Cloudflare Workers/Pages
+// Travel Payout Hotel Finder — Main App Entry
+// Stack: Hono + Cloudflare Workers + D1 + R2
+// NO Supabase. NO Node.js. Pure edge.
 // ============================================================
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -9,14 +10,15 @@ import { CloudflareBindings } from './lib/types'
 import { checkPriceAlerts } from './routes/alerts'
 
 // Route imports
-import authRoutes from './routes/auth'
-import searchRoutes from './routes/search'
+import authRoutes     from './routes/auth'
+import searchRoutes   from './routes/search'
 import favoritesRoutes from './routes/favorites'
-import chatRoutes from './routes/chat'
-import alertsRoutes from './routes/alerts'
+import chatRoutes     from './routes/chat'
+import alertsRoutes   from './routes/alerts'
 import bookingsRoutes from './routes/bookings'
 import webhooksRoutes from './routes/webhooks'
-import adminRoutes from './routes/admin'
+import adminRoutes    from './routes/admin'
+import pricesRoutes   from './routes/prices'
 
 type Variables = { user: any }
 
@@ -24,11 +26,31 @@ const app = new Hono<{ Bindings: CloudflareBindings; Variables: Variables }>()
 
 // ─── Global Middleware ──────────────────────────────────────
 app.use('*', logger())
+
+// CORS — accepts Lovable preview domains, local dev, and production
 app.use('/api/*', cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://travelpayout.app', 'https://*.pages.dev'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  origin: (origin) => {
+    if (!origin) return '*'
+    const allowed = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://localhost:8080',
+      'https://travelpayout.app',
+    ]
+    // Allow any Lovable preview / pages.dev / lovable.app domain
+    if (
+      origin.endsWith('.lovable.app') ||
+      origin.endsWith('.lovableproject.com') ||
+      origin.endsWith('.pages.dev') ||
+      origin.endsWith('.workers.dev') ||
+      allowed.includes(origin)
+    ) return origin
+    return allowed[0]
+  },
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  credentials: true
+  credentials: true,
+  maxAge: 86400
 }))
 
 // ─── Health Check ────────────────────────────────────────────
@@ -37,344 +59,330 @@ app.get('/api/health', (c) => {
     status: 'ok',
     service: 'Travel Payout Hotel Finder API',
     version: '1.0.0',
+    stack: 'Hono + Cloudflare Workers + D1 + R2',
     timestamp: new Date().toISOString(),
-    environment: c.env.TRAVELPAYOUTS_MARKER ? 'production' : 'development'
+    affiliate_marker: '314682'
   })
 })
 
 // ─── API Routes ──────────────────────────────────────────────
-app.route('/api/auth', authRoutes)
-app.route('/api/search', searchRoutes)
+app.route('/api/auth',      authRoutes)
+app.route('/api/search',    searchRoutes)
 app.route('/api/favorites', favoritesRoutes)
-app.route('/api/chat', chatRoutes)
-app.route('/api/alerts', alertsRoutes)
-app.route('/api/bookings', bookingsRoutes)
-app.route('/api/webhook', webhooksRoutes)
-app.route('/api/admin', adminRoutes)
+app.route('/api/chat',      chatRoutes)
+app.route('/api/alerts',    alertsRoutes)
+app.route('/api/bookings',  bookingsRoutes)
+app.route('/api/webhook',   webhooksRoutes)
+app.route('/api/admin',     adminRoutes)
+app.route('/api/prices',    pricesRoutes)
 
-// ─── API Info Route ──────────────────────────────────────────
+// ─── API Docs ────────────────────────────────────────────────
 app.get('/api', (c) => {
   return c.json({
     name: 'Travel Payout Hotel Finder API',
     version: '1.0.0',
-    affiliate_marker: '314682',
+    stack: 'Hono · Cloudflare Workers · D1 · R2',
+    affiliate: { marker: '314682', token: '140003fe70f6a86ab4b3d538bafb7c42' },
+    frontend_repo: 'https://github.com/thebestrendingnow/pixel-perfect',
     endpoints: {
       auth: {
-        'POST /api/auth/register': 'Register new user',
-        'POST /api/auth/login': 'Login',
-        'GET /api/auth/me': 'Get current user',
-        'PATCH /api/auth/profile': 'Update preferences'
+        'POST /api/auth/register':  'Register → JWT',
+        'POST /api/auth/login':     'Login → JWT',
+        'GET  /api/auth/me':        'Profile [JWT]',
+        'PATCH /api/auth/profile':  'Update prefs [JWT]'
       },
       search: {
-        'POST /api/search': 'Search hotels (requires auth)',
-        'GET /api/search/hotel/:id': 'Get hotel details',
-        'GET /api/search/locations?q=': 'Location autocomplete'
+        'POST /api/search':              'Search hotels + D1 cache [JWT]',
+        'GET  /api/search/hotel/:id':    'Hotel details',
+        'GET  /api/search/locations?q=': 'Autocomplete'
       },
-      favorites: {
-        'GET /api/favorites': 'List favorites',
-        'POST /api/favorites/:hotelId': 'Add to favorites',
-        'DELETE /api/favorites/:hotelId': 'Remove from favorites',
-        'GET /api/favorites/check/:hotelId': 'Check if favorited'
+      prices: {
+        'POST /api/prices/compare': 'Multi-provider price comparison (Travelpayouts, Booking, Expedia, Hotels.com)'
       },
       chat: {
-        'POST /api/chat/send': 'AI text chat (traveler+)',
-        'POST /api/chat/voice': 'Voice chat TTS (traveler+)',
-        'GET /api/chat/threads': 'List chat threads',
-        'GET /api/chat/threads/:id': 'Get thread messages',
-        'DELETE /api/chat/threads/:id': 'Delete thread'
+        'POST /api/chat/send':          'AI chat JSON response [traveler+]',
+        'POST /api/chat/stream':        'AI chat SSE stream [traveler+] — for AIChatPanel.tsx',
+        'POST /api/chat/voice':         'Voice → TTS audio [traveler+]',
+        'GET  /api/chat/threads':       'Thread list [JWT]',
+        'GET  /api/chat/threads/:id':   'Thread messages [JWT]',
+        'DELETE /api/chat/threads/:id': 'Delete thread [JWT]'
+      },
+      favorites: {
+        'GET    /api/favorites':            'List favorites [JWT]',
+        'POST   /api/favorites/:hotelId':   'Add [JWT]',
+        'DELETE /api/favorites/:hotelId':   'Remove [JWT]',
+        'GET    /api/favorites/check/:id':  'Is favorited? [JWT]'
       },
       alerts: {
-        'GET /api/alerts': 'List price alerts (traveler+)',
-        'POST /api/alerts': 'Create price alert (traveler+)',
-        'DELETE /api/alerts/:id': 'Delete alert',
-        'PATCH /api/alerts/:id': 'Pause/resume alert'
+        'GET    /api/alerts':      'List alerts [traveler+]',
+        'POST   /api/alerts':      'Create alert [traveler+]',
+        'DELETE /api/alerts/:id':  'Delete [JWT]',
+        'PATCH  /api/alerts/:id':  'Pause/resume [JWT]'
       },
       bookings: {
-        'GET /api/bookings': 'List bookings',
-        'POST /api/bookings': 'Record booking click',
-        'GET /api/bookings/:id': 'Booking details',
-        'GET /api/bookings/export': 'CSV export (business+)'
+        'GET /api/bookings':         'List bookings [JWT]',
+        'POST /api/bookings':        'Record click [JWT]',
+        'GET /api/bookings/:id':     'Details [JWT]',
+        'GET /api/bookings/export':  'CSV export [business+]'
       },
       admin: {
-        'GET /api/admin/dashboard': 'Stats dashboard (business+)',
-        'GET /api/admin/commission-report': 'Commission report (agency)',
-        'GET /api/admin/users': 'User list (agency)'
+        'GET /api/admin/dashboard':         'Stats [business+]',
+        'GET /api/admin/commission-report': 'Revenue [agency]',
+        'GET /api/admin/users':             'Users [agency]'
       },
       webhooks: {
-        'POST /api/webhook/stripe': 'Stripe webhook',
-        'POST /api/webhook/whop': 'Whop webhook'
+        'POST /api/webhook/stripe': 'Stripe events',
+        'POST /api/webhook/whop':   'Whop events'
       }
     },
-    subscription_tiers: {
-      free: { price: '$0/mo', searches: '5/day', features: ['Basic hotel search'] },
-      traveler: { price: '$9.99/mo', searches: 'Unlimited', features: ['AI Chat', 'Voice Search', '3 Price Alerts'] },
-      business: { price: '$24.99/mo', searches: 'Unlimited', features: ['All Traveler +', 'Expense Export', 'Corporate Rates', '10 Price Alerts'] },
-      agency: { price: '$99.99/mo', searches: 'Unlimited', features: ['All Business +', 'API Access', 'White-label', 'Unlimited Alerts', 'Commission Dashboard'] }
+    tiers: {
+      free:     { price: '$0',      searches: '5/day',     features: ['Basic search'] },
+      traveler: { price: '$9.99',   searches: 'Unlimited', features: ['AI Chat', 'SSE Stream', 'Voice', '3 Alerts'] },
+      business: { price: '$24.99',  searches: 'Unlimited', features: ['+ Expense Export', '10 Alerts'] },
+      agency:   { price: '$99.99',  searches: 'Unlimited', features: ['+ API Access', 'White-label', 'Commission Dashboard'] }
     }
   })
 })
 
-// ─── Frontend Catch-all (for SPA routing) ────────────────────
+// ─── Dashboard UI (landing page) ─────────────────────────────
 app.get('/', (c) => {
   return c.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Travel Payout - Hotel Finder</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Travel Payout — Hotel Finder API</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
   <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; }
-    .gradient-bg { background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 50%, #0ea5e9 100%); }
-    .card { background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
-    .tier-badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    :root {
+      --navy: #0c2340; --teal: #2d8a9e; --aqua: #5cbdb9;
+      --bg: #e8f0f8; --card: #ffffff; --text: #1a2e45;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Manrope', sans-serif; background: var(--bg); color: var(--text); }
+    h1,h2,h3 { font-family: 'Sora', sans-serif; }
+    .header { background: linear-gradient(135deg, var(--navy) 0%, #1a4a6e 60%, var(--teal) 100%); color: white; padding: 24px 32px; }
+    .header-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo i { font-size: 28px; color: var(--aqua); }
+    .badge { background: #22c55e; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+    .hero { background: linear-gradient(135deg, var(--navy), #1a4a6e, var(--teal)); color: white; padding: 48px 32px; text-align: center; }
+    .hero h2 { font-size: 36px; margin-bottom: 12px; }
+    .hero p { color: #a8d4e0; font-size: 18px; margin-bottom: 32px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; max-width: 700px; margin: 0 auto; }
+    .stat { background: white; color: var(--text); border-radius: 12px; padding: 16px; }
+    .stat .num { font-size: 28px; font-weight: 700; color: var(--teal); font-family: 'Sora', sans-serif; }
+    .stat .lbl { font-size: 13px; color: #64748b; }
+    .main { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+    .card { background: white; border-radius: 16px; padding: 28px; box-shadow: 0 2px 16px rgba(12,35,64,0.08); margin-bottom: 24px; }
+    .card h3 { font-size: 18px; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .ep { display: flex; gap: 8px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+    .ep:last-child { border: none; }
+    .method { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+    .GET { background: #dcfce7; color: #166534; }
+    .POST { background: #dbeafe; color: #1d4ed8; }
+    .DELETE { background: #fee2e2; color: #991b1b; }
+    .PATCH { background: #fef9c3; color: #92400e; }
+    .ep-info .path { font-family: monospace; font-size: 12px; color: #374151; }
+    .ep-info .desc { font-size: 12px; color: #6b7280; margin-top: 2px; }
+    .tier-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+    .tier-free { background: #f3f4f6; color: #374151; }
+    .tier-traveler { background: #dbeafe; color: #1d4ed8; }
+    .tier-business { background: #f3e8ff; color: #7c3aed; }
+    .tier-agency { background: #fff7ed; color: #c2410c; }
+    .tier-sys { background: #f0fdf4; color: #166534; }
+    .tiers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .tier-card { border: 2px solid; border-radius: 12px; padding: 20px; }
+    .tier-card.free { border-color: #d1d5db; background: #f9fafb; }
+    .tier-card.traveler { border-color: #93c5fd; background: #eff6ff; }
+    .tier-card.business { border-color: #c4b5fd; background: #faf5ff; }
+    .tier-card.agency { border-color: #fed7aa; background: #fff7ed; }
+    .tier-name { font-size: 18px; font-weight: 700; font-family: 'Sora', sans-serif; }
+    .tier-price { font-size: 26px; font-weight: 900; margin: 4px 0 14px; font-family: 'Sora', sans-serif; }
+    .tier-feature { font-size: 12px; color: #374151; padding: 3px 0; }
+    .tier-feature i { color: #22c55e; margin-right: 6px; }
+    .tech-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .tech-chip { padding: 12px 16px; border-radius: 10px; font-size: 13px; }
+    .tech-chip .name { font-weight: 700; }
+    .tech-chip .role { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+    .test-bar { display: flex; gap: 10px; margin-bottom: 14px; }
+    .test-bar input { flex: 1; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 14px; font-family: monospace; font-size: 13px; }
+    .test-bar button { background: var(--teal); color: white; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 700; cursor: pointer; }
+    .test-bar button:hover { background: var(--navy); }
+    pre#apiResult { background: #0c2340; color: #5cbdb9; border-radius: 12px; padding: 18px; font-size: 13px; overflow: auto; max-height: 280px; }
+    @media(max-width: 768px) { .stats,.grid2,.tiers,.tech-grid { grid-template-columns: 1fr 1fr; } }
+    @media(max-width: 480px) { .stats,.tiers,.tech-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body>
 
-  <!-- Header -->
-  <header class="gradient-bg text-white py-6 px-6 shadow-lg">
-    <div class="max-w-6xl mx-auto flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <i class="fas fa-hotel text-2xl text-yellow-300"></i>
-        <div>
-          <h1 class="text-2xl font-bold">Travel Payout</h1>
-          <p class="text-blue-200 text-sm">Hotel Finder — Earn While You Book</p>
-        </div>
-      </div>
-      <div class="flex gap-3">
-        <span class="text-blue-200 text-sm">API v1.0.0</span>
-        <span class="bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold">
-          <i class="fas fa-circle text-xs mr-1"></i>Live
-        </span>
+<header class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <i class="fas fa-hotel"></i>
+      <div>
+        <div style="font-family:Sora;font-size:22px;font-weight:700;">Travel Payout</div>
+        <div style="font-size:12px;color:#a8d4e0;">Hotel Finder API — Hono · D1 · R2</div>
       </div>
     </div>
-  </header>
-
-  <!-- Hero Stats -->
-  <section class="gradient-bg text-white py-12 px-6">
-    <div class="max-w-6xl mx-auto text-center">
-      <h2 class="text-4xl font-bold mb-4">🏨 Hotel Finder Backend API</h2>
-      <p class="text-blue-200 text-lg mb-8">Powered by Travelpayouts Affiliate Network · Marker: 314682</p>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="card p-4 text-gray-800">
-          <div class="text-2xl font-bold text-blue-600">40%</div>
-          <div class="text-sm text-gray-600">Max Commission</div>
-        </div>
-        <div class="card p-4 text-gray-800">
-          <div class="text-2xl font-bold text-green-600">7</div>
-          <div class="text-sm text-gray-600">User Segments</div>
-        </div>
-        <div class="card p-4 text-gray-800">
-          <div class="text-2xl font-bold text-purple-600">13</div>
-          <div class="text-sm text-gray-600">Languages</div>
-        </div>
-        <div class="card p-4 text-gray-800">
-          <div class="text-2xl font-bold text-orange-600">4</div>
-          <div class="text-sm text-gray-600">Subscription Tiers</div>
-        </div>
-      </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <span style="color:#a8d4e0;font-size:13px;">v1.0.0</span>
+      <span class="badge"><i class="fas fa-circle" style="font-size:8px;margin-right:4px;"></i>Live</span>
     </div>
-  </section>
+  </div>
+</header>
 
-  <!-- Main Content -->
-  <main class="max-w-6xl mx-auto px-6 py-10">
-    
-    <!-- Quick Test -->
-    <section class="card p-6 mb-8">
-      <h3 class="text-xl font-bold text-gray-800 mb-4">
-        <i class="fas fa-flask text-blue-500 mr-2"></i>API Quick Test
-      </h3>
-      <div class="flex gap-3 mb-4">
-        <input id="testUrl" value="/api/health" class="flex-1 border border-gray-300 rounded-lg px-4 py-2 font-mono text-sm" placeholder="/api/endpoint"/>
-        <button onclick="testAPI()" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-semibold">
-          <i class="fas fa-play mr-2"></i>Test
-        </button>
-      </div>
-      <pre id="apiResult" class="bg-gray-900 text-green-400 rounded-lg p-4 text-sm overflow-auto max-h-64 font-mono">
-// Click Test to see API response
-      </pre>
-    </section>
+<section class="hero">
+  <h2>🏨 Hotel Finder Backend API</h2>
+  <p>Travelpayouts Affiliate · Marker: 314682 · Hono on Cloudflare Workers</p>
+  <div class="stats">
+    <div class="stat"><div class="num">40%</div><div class="lbl">Max Commission</div></div>
+    <div class="stat"><div class="num">4</div><div class="lbl">Price Providers</div></div>
+    <div class="stat"><div class="num">SSE</div><div class="lbl">AI Streaming</div></div>
+    <div class="stat"><div class="num">D1+R2</div><div class="lbl">Edge Storage</div></div>
+  </div>
+</section>
 
-    <!-- Endpoints -->
-    <section class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-      
-      <div class="card p-6">
-        <h3 class="text-lg font-bold text-gray-800 mb-4">
-          <i class="fas fa-key text-yellow-500 mr-2"></i>Authentication
-        </h3>
-        <div class="space-y-2">
-          ${endpointItem('POST', '/api/auth/register', 'Register new user', 'free')}
-          ${endpointItem('POST', '/api/auth/login', 'Login & get JWT token', 'free')}
-          ${endpointItem('GET', '/api/auth/me', 'Current user profile', 'auth')}
-        </div>
-      </div>
+<main class="main">
 
-      <div class="card p-6">
-        <h3 class="text-lg font-bold text-gray-800 mb-4">
-          <i class="fas fa-search text-blue-500 mr-2"></i>Hotel Search
-        </h3>
-        <div class="space-y-2">
-          ${endpointItem('POST', '/api/search', 'Search hotels + AI cache', 'auth')}
-          ${endpointItem('GET', '/api/search/hotel/:id', 'Hotel details', 'free')}
-          ${endpointItem('GET', '/api/search/locations', 'Location autocomplete', 'free')}
-        </div>
-      </div>
+  <div class="card">
+    <h3><i class="fas fa-flask" style="color:var(--teal)"></i> Live API Test</h3>
+    <div class="test-bar">
+      <input id="testUrl" value="/api/health" placeholder="/api/endpoint"/>
+      <button onclick="testAPI()"><i class="fas fa-play"></i> Run</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      ${['GET /api/health','GET /api','POST /api/auth/register','POST /api/prices/compare'].map(u =>
+        `<span onclick="document.getElementById('testUrl').value='${u.split(' ')[1]}'"
+          style="cursor:pointer;background:#f1f5f9;border-radius:6px;padding:4px 10px;font-size:12px;font-family:monospace;">${u}</span>`
+      ).join('')}
+    </div>
+    <pre id="apiResult">// Click Run to test any endpoint</pre>
+  </div>
 
-      <div class="card p-6">
-        <h3 class="text-lg font-bold text-gray-800 mb-4">
-          <i class="fas fa-robot text-purple-500 mr-2"></i>AI Chat & Voice
-        </h3>
-        <div class="space-y-2">
-          ${endpointItem('POST', '/api/chat/send', 'AI hotel chat (LaoZhang/KIE)', 'traveler')}
-          ${endpointItem('POST', '/api/chat/voice', 'Voice TTS (ElevenLabs)', 'traveler')}
-          ${endpointItem('GET', '/api/chat/threads', 'Chat history', 'traveler')}
-        </div>
-      </div>
+  <div class="grid2">
+    <div class="card">
+      <h3><i class="fas fa-key" style="color:#f59e0b"></i> Auth</h3>
+      ${ep('POST','/api/auth/register','Register → JWT','free')}
+      ${ep('POST','/api/auth/login','Login → JWT','free')}
+      ${ep('GET','/api/auth/me','Current user','auth')}
+      ${ep('PATCH','/api/auth/profile','Update prefs','auth')}
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-search" style="color:var(--teal)"></i> Hotel Search</h3>
+      ${ep('POST','/api/search','Search + D1 cache','auth')}
+      ${ep('GET','/api/search/hotel/:id','Hotel detail','free')}
+      ${ep('GET','/api/search/locations','Autocomplete','free')}
+      ${ep('POST','/api/prices/compare','Multi-provider prices','free')}
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-robot" style="color:#8b5cf6"></i> AI Chat & Voice</h3>
+      ${ep('POST','/api/chat/stream','SSE stream — AIChatPanel.tsx','traveler')}
+      ${ep('POST','/api/chat/send','JSON response','traveler')}
+      ${ep('POST','/api/chat/voice','Voice → ElevenLabs TTS','traveler')}
+      ${ep('GET','/api/chat/threads','Thread history','traveler')}
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-bell" style="color:#ef4444"></i> Price Alerts (Cron)</h3>
+      ${ep('GET','/api/alerts','List alerts','traveler')}
+      ${ep('POST','/api/alerts','Create alert','traveler')}
+      ${ep('DELETE','/api/alerts/:id','Remove','auth')}
+      ${ep('PATCH','/api/alerts/:id','Pause/resume','auth')}
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-receipt" style="color:#10b981"></i> Bookings</h3>
+      ${ep('GET','/api/bookings','List bookings','auth')}
+      ${ep('POST','/api/bookings','Record click','auth')}
+      ${ep('GET','/api/bookings/export','CSV export','business')}
+      ${ep('GET','/api/admin/dashboard','Commission stats','business')}
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-plug" style="color:#f97316"></i> Webhooks</h3>
+      ${ep('POST','/api/webhook/stripe','Stripe subscription sync','system')}
+      ${ep('POST','/api/webhook/whop','Whop membership sync','system')}
+    </div>
+  </div>
 
-      <div class="card p-6">
-        <h3 class="text-lg font-bold text-gray-800 mb-4">
-          <i class="fas fa-bell text-red-500 mr-2"></i>Price Alerts
-        </h3>
-        <div class="space-y-2">
-          ${endpointItem('GET', '/api/alerts', 'List active alerts', 'traveler')}
-          ${endpointItem('POST', '/api/alerts', 'Create price alert', 'traveler')}
-          ${endpointItem('DELETE', '/api/alerts/:id', 'Remove alert', 'traveler')}
-        </div>
-      </div>
+  <div class="card">
+    <h3><i class="fas fa-crown" style="color:#f59e0b"></i> Subscription Tiers</h3>
+    <div class="tiers">
+      ${tier('free','Free','$0/mo','gray',['5 searches/day','Basic results','Public endpoints'])}
+      ${tier('traveler','Traveler','$9.99/mo','blue',['Unlimited searches','AI Chat (SSE stream)','Voice + TTS','3 Price Alerts'])}
+      ${tier('business','Business','$24.99/mo','purple',['All Traveler+','Expense CSV export','Corporate rates','10 Price Alerts'])}
+      ${tier('agency','Agency','$99.99/mo','orange',['All Business+','API access','White-label','Unlimited alerts','Commission dashboard'])}
+    </div>
+  </div>
 
-      <div class="card p-6">
-        <h3 class="text-lg font-bold text-gray-800 mb-4">
-          <i class="fas fa-chart-line text-green-500 mr-2"></i>Admin & Reports
-        </h3>
-        <div class="space-y-2">
-          ${endpointItem('GET', '/api/admin/dashboard', 'Booking + commission stats', 'business')}
-          ${endpointItem('GET', '/api/admin/commission-report', 'Full revenue report', 'agency')}
-          ${endpointItem('GET', '/api/bookings/export', 'CSV expense export', 'business')}
-        </div>
-      </div>
+  <div class="card">
+    <h3><i class="fas fa-server" style="color:#64748b"></i> Stack — No Supabase. Pure Edge.</h3>
+    <div class="tech-grid">
+      ${tech('Hono 4.x','Edge Framework','#fff7ed','#c2410c')}
+      ${tech('Cloudflare D1','SQLite Database','#eff6ff','#1d4ed8')}
+      ${tech('Cloudflare R2','Audio/Image Store','#eff6ff','#1d4ed8')}
+      ${tech('Travelpayouts','Hotel API + Affiliate','#f0fdf4','#166534')}
+      ${tech('LaoZhang/KIE.ai','AI Chat + SSE','#faf5ff','#7c3aed')}
+      ${tech('ElevenLabs','Voice TTS (Bella)','#fdf2f8','#9d174d')}
+      ${tech('Stripe + Whop','Subscriptions','#f0fdf4','#166534')}
+      ${tech('Resend','Email Alerts','#fef2f2','#b91c1c')}
+    </div>
+  </div>
 
-      <div class="card p-6">
-        <h3 class="text-lg font-bold text-gray-800 mb-4">
-          <i class="fas fa-webhook text-orange-500 mr-2"></i>Webhooks
-        </h3>
-        <div class="space-y-2">
-          ${endpointItem('POST', '/api/webhook/stripe', 'Stripe subscription events', 'system')}
-          ${endpointItem('POST', '/api/webhook/whop', 'Whop membership events', 'system')}
-        </div>
-      </div>
-    </section>
+</main>
 
-    <!-- Subscription Tiers -->
-    <section class="card p-6 mb-8">
-      <h3 class="text-xl font-bold text-gray-800 mb-6">
-        <i class="fas fa-crown text-yellow-500 mr-2"></i>Subscription Tiers
-      </h3>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        ${tierCard('Free', '$0', 'gray', ['5 searches/day', 'Basic results', 'Public API access'])}
-        ${tierCard('Traveler', '$9.99', 'blue', ['Unlimited searches', 'AI Chat', 'Voice Search', '3 Price Alerts'])}
-        ${tierCard('Business', '$24.99', 'purple', ['All Traveler+', 'Expense Export', 'Corporate Rates', '10 Price Alerts'])}
-        ${tierCard('Agency', '$99.99', 'orange', ['All Business+', 'API Access', 'White-label', 'Unlimited Alerts', 'Commission Dashboard'])}
-      </div>
-    </section>
+<footer style="text-align:center;padding:24px;color:#6b7280;font-size:13px;">
+  Travel Payout Hotel Finder · Hono on Cloudflare Workers · Affiliate Marker: 314682 · No Supabase 🚫
+</footer>
 
-    <!-- Architecture -->
-    <section class="card p-6">
-      <h3 class="text-xl font-bold text-gray-800 mb-4">
-        <i class="fas fa-server text-gray-500 mr-2"></i>Tech Stack
-      </h3>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        ${techBadge('Hono', 'Edge Framework', 'bg-orange-100 text-orange-800')}
-        ${techBadge('Cloudflare D1', 'SQLite Database', 'bg-blue-100 text-blue-800')}
-        ${techBadge('Cloudflare R2', 'Audio Storage', 'bg-blue-100 text-blue-800')}
-        ${techBadge('Travelpayouts', 'Hotel API', 'bg-green-100 text-green-800')}
-        ${techBadge('LaoZhang/KIE.ai', 'AI Engine', 'bg-purple-100 text-purple-800')}
-        ${techBadge('ElevenLabs', 'TTS Voice', 'bg-pink-100 text-pink-800')}
-        ${techBadge('Stripe + Whop', 'Payments', 'bg-indigo-100 text-indigo-800')}
-        ${techBadge('Resend', 'Email Alerts', 'bg-red-100 text-red-800')}
-      </div>
-    </section>
-
-  </main>
-
-  <footer class="text-center py-6 text-gray-500 text-sm">
-    Travel Payout Hotel Finder API · Affiliate Marker: 314682 · Built on Cloudflare Workers
-  </footer>
-
-  <script>
-    async function testAPI() {
-      const url = document.getElementById('testUrl').value;
-      const pre = document.getElementById('apiResult');
-      pre.textContent = '⏳ Loading...';
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-        pre.textContent = JSON.stringify(data, null, 2);
-      } catch(e) {
-        pre.textContent = '❌ Error: ' + e.message;
-      }
-    }
-    // Quick select examples
-    document.querySelectorAll('[data-url]').forEach(el => {
-      el.style.cursor = 'pointer';
-      el.addEventListener('click', () => {
-        document.getElementById('testUrl').value = el.dataset.url;
-      });
-    });
-  </script>
+<script>
+async function testAPI() {
+  const url = document.getElementById('testUrl').value.trim()
+  const pre = document.getElementById('apiResult')
+  pre.textContent = '⏳ Fetching ' + url + '...'
+  try {
+    const isPost = url.includes('compare') || url.includes('register') || url.includes('login')
+    const opts = isPost
+      ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({hotel_id:'hotel-001',guests:2,currency:'USD'}) }
+      : {}
+    const res = await fetch(url, opts)
+    const data = await res.json()
+    pre.textContent = JSON.stringify(data, null, 2)
+  } catch(e) { pre.textContent = '❌ ' + e.message }
+}
+</script>
 </body>
 </html>`)
 })
 
-function endpointItem(method: string, path: string, desc: string, tier: string): string {
-  const colors: Record<string, string> = {
-    GET: 'bg-green-100 text-green-700',
-    POST: 'bg-blue-100 text-blue-700',
-    DELETE: 'bg-red-100 text-red-700',
-    PATCH: 'bg-yellow-100 text-yellow-700'
-  }
-  const tierColors: Record<string, string> = {
-    free: 'bg-gray-100 text-gray-600',
-    auth: 'bg-blue-50 text-blue-600',
-    traveler: 'bg-indigo-100 text-indigo-700',
-    business: 'bg-purple-100 text-purple-700',
-    agency: 'bg-orange-100 text-orange-700',
-    system: 'bg-red-50 text-red-600'
-  }
-  return `<div class="flex items-start gap-2 py-2 border-b border-gray-100 last:border-0" data-url="${path}">
-    <span class="text-xs font-bold px-2 py-1 rounded ${colors[method] || 'bg-gray-100'} shrink-0">${method}</span>
-    <div class="flex-1 min-w-0">
-      <div class="font-mono text-xs text-gray-700 truncate">${path}</div>
-      <div class="text-xs text-gray-500">${desc}</div>
+function ep(method: string, path: string, desc: string, tier: string): string {
+  const t: Record<string,string> = { free:'tier-free', auth:'tier-traveler', traveler:'tier-traveler', business:'tier-business', agency:'tier-agency', system:'tier-sys' }
+  return `<div class="ep">
+    <span class="method ${method}">${method}</span>
+    <div class="ep-info" style="flex:1">
+      <div class="path">${path}</div>
+      <div class="desc">${desc}</div>
     </div>
-    <span class="text-xs px-2 py-1 rounded ${tierColors[tier] || 'bg-gray-100'} shrink-0">${tier}</span>
+    <span class="tier-badge ${t[tier]||'tier-free'}">${tier}</span>
   </div>`
 }
 
-function tierCard(name: string, price: string, color: string, features: string[]): string {
-  const colors: Record<string, string> = {
-    gray: 'border-gray-300 bg-gray-50', blue: 'border-blue-400 bg-blue-50',
-    purple: 'border-purple-400 bg-purple-50', orange: 'border-orange-400 bg-orange-50'
-  }
-  const textColors: Record<string, string> = {
-    gray: 'text-gray-700', blue: 'text-blue-700', purple: 'text-purple-700', orange: 'text-orange-700'
-  }
-  return `<div class="border-2 ${colors[color]} rounded-xl p-4">
-    <div class="font-bold ${textColors[color]} text-lg">${name}</div>
-    <div class="text-2xl font-black ${textColors[color]} mb-3">${price}<span class="text-sm font-normal">/mo</span></div>
-    <ul class="space-y-1">${features.map(f => `<li class="text-xs text-gray-600"><i class="fas fa-check text-green-500 mr-1"></i>${f}</li>`).join('')}</ul>
+function tier(cls: string, name: string, price: string, _color: string, features: string[]): string {
+  return `<div class="tier-card ${cls}">
+    <div class="tier-name">${name}</div>
+    <div class="tier-price">${price}</div>
+    ${features.map(f => `<div class="tier-feature"><i class="fas fa-check"></i>${f}</div>`).join('')}
   </div>`
 }
 
-function techBadge(name: string, desc: string, cls: string): string {
-  return `<div class="rounded-lg px-3 py-2 ${cls}">
-    <div class="font-semibold">${name}</div>
-    <div class="opacity-75 text-xs">${desc}</div>
+function tech(name: string, role: string, bg: string, color: string): string {
+  return `<div class="tech-chip" style="background:${bg};color:${color}">
+    <div class="name">${name}</div>
+    <div class="role">${role}</div>
   </div>`
 }
 
-// ─── Cron Trigger (Price Alerts - every hour) ─────────────────
+// ─── Cron Trigger — runs every hour for price alerts ─────────
 export default {
   fetch: app.fetch,
   async scheduled(event: ScheduledEvent, env: CloudflareBindings, ctx: ExecutionContext) {

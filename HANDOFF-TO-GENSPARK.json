@@ -1,0 +1,186 @@
+{
+  "project": "Travel Payout Hotel Finder",
+  "version": "1.0.0",
+  "stack": "Hono + Cloudflare Workers + D1 + R2 — NO Supabase",
+
+  "repo": {
+    "url": "https://github.com/thebestrendingnow/pixel-perfect",
+    "branch": "main",
+    "github_account": "thebestrendingnow / LastGit1111"
+  },
+
+  "travelpayouts": {
+    "api_token": "140003fe70f6a86ab4b3d538bafb7c42",
+    "marker": "314682",
+    "user_id": "314682",
+    "affiliate_link_format": "https://www.travelpayouts.com/hotels/{hotelId}?marker=314682",
+    "search_endpoint": "https://engine.hotellook.com/api/v2/cache.json"
+  },
+
+  "backend_completed": [
+    "✅ Hono app on Cloudflare Workers (src/index.tsx)",
+    "✅ JWT Auth — register, login, /me, profile update (src/routes/auth.ts)",
+    "✅ Hotel Search — Travelpayouts API + D1 cache (1hr TTL) (src/routes/search.ts)",
+    "✅ Price Comparison — Travelpayouts + Booking.com + Expedia + Hotels.com (src/routes/prices.ts)",
+    "✅ AI Chat JSON — LaoZhang/KIE.ai intent extraction + recommendations (src/routes/chat.ts)",
+    "✅ AI Chat SSE STREAM — token-by-token for AIChatPanel.tsx (POST /api/chat/stream)",
+    "✅ Voice Chat — transcript → hotel search → ElevenLabs TTS → R2 (src/routes/chat.ts)",
+    "✅ Favorites — save/list/remove/check (src/routes/favorites.ts)",
+    "✅ Price Alerts — create/list/delete/pause + Resend email (src/routes/alerts.ts)",
+    "✅ Hourly CRON — Cloudflare Cron Trigger checks all active alerts",
+    "✅ Bookings — click tracking + CSV expense export (src/routes/bookings.ts)",
+    "✅ Stripe Webhook — subscription tier sync (src/routes/webhooks.ts)",
+    "✅ Whop Webhook — membership granted/expired sync (src/routes/webhooks.ts)",
+    "✅ Admin Dashboard — commission stats, monthly breakdown (src/routes/admin.ts)",
+    "✅ Agency Commission Report — full revenue report (src/routes/admin.ts)",
+    "✅ D1 Database — 9 tables, full schema + indexes (migrations/0001_initial_schema.sql)",
+    "✅ R2 Storage — voice audio files keyed by user/message",
+    "✅ Tier gating middleware — free/traveler/business/agency (src/middleware/auth.ts)",
+    "✅ CORS — accepts Lovable preview domains + production",
+    "✅ Rate limiting — 5 searches/day for free tier"
+  ],
+
+  "api_endpoints": {
+    "health":   "GET  /api/health",
+    "auth": [
+      "POST /api/auth/register",
+      "POST /api/auth/login",
+      "GET  /api/auth/me",
+      "PATCH /api/auth/profile"
+    ],
+    "search": [
+      "POST /api/search",
+      "GET  /api/search/hotel/:id",
+      "GET  /api/search/locations?q="
+    ],
+    "prices": [
+      "POST /api/prices/compare"
+    ],
+    "chat": [
+      "POST /api/chat/stream   ← SSE for AIChatPanel.tsx",
+      "POST /api/chat/send     ← JSON alternative",
+      "POST /api/chat/voice    ← ElevenLabs TTS",
+      "GET  /api/chat/threads",
+      "GET  /api/chat/threads/:id",
+      "DELETE /api/chat/threads/:id"
+    ],
+    "favorites": [
+      "GET    /api/favorites",
+      "POST   /api/favorites/:hotelId",
+      "DELETE /api/favorites/:hotelId",
+      "GET    /api/favorites/check/:hotelId"
+    ],
+    "alerts": [
+      "GET    /api/alerts",
+      "POST   /api/alerts",
+      "DELETE /api/alerts/:id",
+      "PATCH  /api/alerts/:id"
+    ],
+    "bookings": [
+      "GET  /api/bookings",
+      "POST /api/bookings",
+      "GET  /api/bookings/:id",
+      "GET  /api/bookings/export  (CSV, business+)"
+    ],
+    "admin": [
+      "GET /api/admin/dashboard",
+      "GET /api/admin/commission-report",
+      "GET /api/admin/users"
+    ],
+    "webhooks": [
+      "POST /api/webhook/stripe",
+      "POST /api/webhook/whop"
+    ]
+  },
+
+  "lovable_integration": {
+    "AIChatPanel_endpoint": "POST /api/chat/stream",
+    "AIChatPanel_type": "SSE (text/event-stream)",
+    "AIChatPanel_events": {
+      "thread_id": "{ type: 'thread_id', thread_id: string }",
+      "hotels":    "{ type: 'hotels', hotels: Hotel[] }",
+      "token":     "{ type: 'token', token: string }",
+      "done":      "{ type: 'done', thread_id: string }",
+      "error":     "{ type: 'error', error: string }"
+    },
+    "PriceComparisonTable_endpoint": "POST /api/prices/compare",
+    "PriceComparisonTable_request": {
+      "hotel_id": "string",
+      "check_in": "YYYY-MM-DD",
+      "check_out": "YYYY-MM-DD",
+      "guests": "number",
+      "currency": "USD"
+    },
+    "PriceComparisonTable_response": {
+      "hotel_id": "string",
+      "hotel_name": "string",
+      "prices": [
+        {
+          "provider": "Travelpayouts | Booking.com | Expedia | Hotels.com",
+          "price": "number",
+          "currency": "string",
+          "is_best_price": "boolean",
+          "discount_pct": "number",
+          "book_url": "string",
+          "is_refundable": "boolean",
+          "includes_breakfast": "boolean"
+        }
+      ],
+      "best_price": "number",
+      "best_provider": "string"
+    },
+    "auth_header": "Authorization: Bearer <JWT>",
+    "cors": "Accepts *.lovable.app, *.lovableproject.com, *.pages.dev"
+  },
+
+  "d1_schema_tables": [
+    "users",
+    "hotel_cache",
+    "favorites",
+    "price_alerts",
+    "bookings",
+    "chat_threads",
+    "chat_messages",
+    "voice_messages",
+    "whop_subscriptions",
+    "expense_reports"
+  ],
+
+  "environment_variables": {
+    "TRAVELPAYOUTS_API_KEY": "140003fe70f6a86ab4b3d538bafb7c42",
+    "TRAVELPAYOUTS_MARKER":  "314682",
+    "LAOZHANG_API_KEY":      "<your-laozhang-key>",
+    "ELEVENLABS_API_KEY":    "<your-elevenlabs-key>",
+    "STRIPE_SECRET_KEY":     "sk_live_...",
+    "STRIPE_WEBHOOK_SECRET": "whsec_...",
+    "WHOP_API_KEY":          "<your-whop-key>",
+    "WHOP_WEBHOOK_SECRET":   "<your-whop-webhook-secret>",
+    "JWT_SECRET":            "<random-256-bit-string>",
+    "RESEND_API_KEY":        "re_..."
+  },
+
+  "deploy_commands": [
+    "npm install",
+    "npx wrangler d1 create travel-payout-production",
+    "# Copy database_id to wrangler.jsonc",
+    "npx wrangler r2 bucket create travel-payout-media",
+    "npm run build",
+    "npx wrangler d1 migrations apply travel-payout-production",
+    "npm run deploy",
+    "npx wrangler pages secret put TRAVELPAYOUTS_API_KEY --project-name travel-payout-hotels",
+    "npx wrangler pages secret put JWT_SECRET --project-name travel-payout-hotels",
+    "# ... add all other secrets"
+  ],
+
+  "subscription_revenue": {
+    "model": "Affiliate commissions (25-40%) + SaaS subscriptions",
+    "conservative_year1": "$72,000",
+    "aggressive_year2": "$1,050,000",
+    "tiers": {
+      "free":     "$0/mo  — 5 searches/day",
+      "traveler": "$9.99/mo — Unlimited + AI + Voice + 3 alerts",
+      "business": "$24.99/mo — + Expense export + 10 alerts",
+      "agency":   "$99.99/mo — + API + White-label + Unlimited"
+    }
+  }
+}
