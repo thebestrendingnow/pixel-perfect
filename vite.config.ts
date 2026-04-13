@@ -5,31 +5,28 @@ import path from 'path'
 
 export default defineConfig(({ mode }) => {
   if (mode === 'worker') {
-    // Build the Hono backend worker
+    // Build Hono backend worker from api/ folder — completely separate from src/
     return {
-      plugins: [build({ entry: 'src/index.tsx' })],
-      build: {
-        outDir: 'dist',
-      },
+      plugins: [build({ entry: 'api/worker.ts' })],
+      build: { outDir: 'dist' },
     }
   }
 
-  // Build the React SPA frontend
+  // Build React SPA — only touches src/ and index.html, never api/
   return {
     plugins: [react()],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
+      alias: { '@': path.resolve(__dirname, './src') },
     },
     build: {
       outDir: 'dist',
-      emptyOutDir: false, // don't wipe the worker build
+      emptyOutDir: false,
+      rollupOptions: {
+        input: { index: path.resolve(__dirname, 'index.html') },
+      },
     },
     server: {
-      proxy: {
-        '/api': 'http://localhost:3000',
-      },
+      proxy: { '/api': 'http://localhost:3000' },
     },
   }
 })

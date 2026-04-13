@@ -5,13 +5,15 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx",
-    "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"],
-    "paths": {},
+    "jsxImportSource": "react",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "baseUrl": ".",
     "skipLibCheck": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*", "index.html"],
+  "exclude": ["node_modules", "dist", "api"]
 }
