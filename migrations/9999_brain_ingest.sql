@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS brain_ingest (
+  id TEXT PRIMARY KEY,
+  body TEXT,
+  received_at TEXT DEFAULT CURRENT_TIMESTAMP
+);

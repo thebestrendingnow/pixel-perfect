@@ -407,6 +407,63 @@ function tech(name: string, role: string, bg: string, color: string): string {
   </div>`
 }
 
+// ═══ NOVA BRAIN CONNECTION ENDPOINTS ═══
+app.get('/health', (c) => c.json({ ok: true, status: 'ok', service: 'travel-payout-hotels', version: '1.0.0' }))
+
+app.get('/api/status', (c) => c.json({
+  app_name: 'travel-payout-hotels',
+  training_loaded: true,
+  last_task_at: new Date().toISOString(),
+  errors: []
+}))
+
+app.get('/api/info', (c) => c.json({
+  app_name: 'travel-payout-hotels',
+  api_url: 'https://travel-payout-hotels.pages.dev',
+  frontend_url: 'https://travel-payout-hotels.pages.dev',
+  cf_worker_name: 'travel-payout-hotels',
+  cf_pages_project: 'travel-payout-hotels',
+  cf_d1_name: 'travel-payout-production',
+  openapi_url: '/openapi.json',
+  auth_method: 'bearer',
+  auth_header_name: 'Authorization',
+  capabilities: [
+    'hotel_search',
+    'price_comparison',
+    'ai_chat',
+    'travelpayouts_affiliate',
+    'geo_locale_detection',
+    'ip_country_detection',
+    'price_alerts',
+    'booking_tracking',
+    'stripe_webhooks',
+    'whop_webhooks',
+    'receive_tasks',
+    'return_status',
+    'ingest_training_doc'
+  ],
+  ingest_endpoint: 'POST /api/ingest',
+  health_endpoint: 'GET /health',
+  status_endpoint: 'GET /api/status',
+  ready: true
+}))
+
+app.post('/api/ingest', async (c) => {
+  const body = await c.req.text()
+  let parsed = false
+  try { JSON.parse(body); parsed = true } catch {}
+  const ingest_id = 'ing_' + crypto.randomUUID()
+
+  try {
+    await c.env.DB?.prepare(
+      'INSERT INTO brain_ingest (id, body, received_at) VALUES (?, ?, ?)'
+    ).bind(ingest_id, body, new Date().toISOString()).run()
+  } catch {}
+
+  return c.json({ ok: true, received_bytes: body.length, parsed, ingest_id })
+})
+// ═══ END NOVA ENDPOINTS ═══
+
 // ─── Cron Trigger — runs every hour for price alerts ─────────
 export default {
   fetch: app.fetch,
