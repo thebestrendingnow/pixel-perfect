@@ -22,6 +22,7 @@ import pricesRoutes   from './routes/prices'
 import localeRoutes   from './routes/locale'
 import hotelsRoutes   from './routes/hotels'
 import { getSiteConfig } from './lib/config'
+import { buildAffiliateLink, normalizeHotel, searchHotels, TRAVELPAYOUTS_MARKER } from './lib/travelpayouts'
 
 type Variables = { user: any }
 
@@ -69,6 +70,53 @@ app.get('/api/health', (c) => {
 })
 
 // ─── API Routes ──────────────────────────────────────────────
+// Private ECCO MCP endpoints. Phase 1 exposes hotel read/generate tools only;
+// no admin, ingest, checkout, webhook, Stripe, Whop, write, or delete routes.
+app.use('/mcp/*', async (c, next) => {
+  const configuredToken = c.env.PRIVATE_GATEWAY_TOKEN
+  if (!configuredToken) return c.json({ error: 'PRIVATE_GATEWAY_TOKEN is not configured' }, 503)
+
+  const bearerToken = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (bearerToken !== configuredToken) return c.json({ error: 'Unauthorized' }, 401)
+
+  await next()
+})
+
+app.get('/mcp/manifest', (c) => c.json(getMcpManifest(c.req.url)))
+app.get('/mcp/tools', (c) => c.json({ tools: getMcpTools() }))
+app.post('/mcp/call', async (c) => {
+  let body: any
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  const tool = body?.tool
+  const input = body?.input || {}
+  const requestId = body?.request_id || crypto.randomUUID()
+
+  try {
+    if (tool === 'hotels.search_hotels') {
+      return c.json({ ok: true, request_id: requestId, tool, data: await mcpSearchHotels(c.env, input) })
+    }
+    if (tool === 'hotels.get_affiliate_links') {
+      return c.json({ ok: true, request_id: requestId, tool, data: await mcpGetAffiliateLinks(c.env, input) })
+    }
+    if (tool === 'hotels.get_map_markers') {
+      return c.json({ ok: true, request_id: requestId, tool, data: await mcpGetMapMarkers(c.env, input) })
+    }
+    if (tool === 'hotels.track_affiliate_click') {
+      return c.json({ ok: true, request_id: requestId, tool, data: await mcpTrackAffiliateClick(c.env, input) })
+    }
+
+    return c.json({ error: 'Unknown MCP tool', tool }, 404)
+  } catch (error: any) {
+    const status = error?.status || 500
+    return c.json({ ok: false, request_id: requestId, tool, error: error?.message || 'MCP tool failed' }, status)
+  }
+})
+
 app.route('/api/auth',      authRoutes)
 app.route('/api/search',    searchRoutes)
 app.route('/api/favorites', favoritesRoutes)
@@ -408,6 +456,254 @@ function tech(name: string, role: string, bg: string, color: string): string {
 }
 
 // ═══ NOVA BRAIN CONNECTION ENDPOINTS ═══
+function getMcpManifest(url: string) {
+  const origin = new URL(url).origin
+  return {
+    app: {
+      name: 'Pixel Perfect Hotel Finder',
+      slug: 'pixel-perfect',
+      owner: 'thebestrendingnow',
+      classification: 'hotel_affiliate_app',
+      description: 'Travelpayouts-backed hotel affiliate search and map app on Cloudflare D1/R2.',
+      repository: 'https://github.com/thebestrendingnow/pixel-perfect'
+    },
+    protocol: {
+      type: 'private_mcp_http',
+      auth: 'bearer',
+      manifest_url: `${origin}/mcp/manifest`,
+      tools_url: `${origin}/mcp/tools`,
+      call_url: `${origin}/mcp/call`
+    },
+    tools: getMcpTools()
+  }
+}
+
+function getMcpTools() {
+  return [
+    { name: 'hotels.search_hotels', description: 'Search real Travelpayouts/cache hotel data. No mock prices are generated.' },
+    { name: 'hotels.get_affiliate_links', description: 'Return Travelpayouts affiliate links for known hotel IDs.' },
+    { name: 'hotels.get_map_markers', description: 'Return D1 cached hotel map markers with real stored coordinates only.' },
+    { name: 'hotels.track_affiliate_click', description: 'Generate a dry-run affiliate click tracking payload. Phase 1 does not mutate bookings.' }
+  ]
+}
+
+async function mcpSearchHotels(env: CloudflareBindings, input: any) {
+  const location = String(input.location || '').trim()
+  if (!location) throw httpError(400, 'location is required')
+
+  const limit = clampNumber(input.limit || 10, 1, 25)
+  const currency = input.currency || 'USD'
+  const cached = await searchCachedHotels(env, location, limit)
+
+  if (cached.length > 0) {
+    return {
+      source: 'd1_cache',
+      provider_status: { travelpayouts: 'cache_hit', simulated_providers: 'not_used' },
+      hotels: cached.map(toMcpHotel),
+      warnings: []
+    }
+  }
+
+  if (!env.TRAVELPAYOUTS_API_KEY) {
+    return {
+      source: 'unavailable',
+      provider_status: { travelpayouts: 'missing_api_key', simulated_providers: 'not_used' },
+      hotels: [],
+      warnings: ['No cached hotels and TRAVELPAYOUTS_API_KEY is not configured. No mock prices were generated.']
+    }
+  }
+
+  const rawHotels = await searchHotels({
+    location,
+    checkIn: input.check_in,
+    checkOut: input.check_out,
+    adults: input.guests || 2,
+    rooms: input.rooms || 1,
+    currency,
+    language: input.language || 'en',
+    limit,
+    token: env.TRAVELPAYOUTS_API_KEY
+  })
+  const normalized = rawHotels.map((hotel) => normalizeHotel(hotel, env.TRAVELPAYOUTS_API_KEY))
+
+  return {
+    source: 'travelpayouts_api',
+    provider_status: { travelpayouts: normalized.length > 0 ? 'ok' : 'no_results', simulated_providers: 'not_used' },
+    hotels: normalized.map(toMcpHotel),
+    warnings: normalized.length === 0 ? ['Travelpayouts returned no results. No mock hotel prices were generated.'] : []
+  }
+}
+
+async function mcpGetAffiliateLinks(env: CloudflareBindings, input: any) {
+  const hotelIds = Array.isArray(input.hotel_ids) ? input.hotel_ids.map(String).filter(Boolean).slice(0, 50) : []
+  if (hotelIds.length === 0) throw httpError(400, 'hotel_ids is required')
+
+  const links = []
+  const warnings: string[] = []
+  for (const hotelId of hotelIds) {
+    const hotel = await safeFirst<any>(
+      env,
+      'SELECT id, travelpayouts_id, name, affiliate_link FROM hotel_cache WHERE id = ? OR travelpayouts_id = ? LIMIT 1',
+      [hotelId, hotelId],
+      warnings
+    )
+    const travelpayoutsId = hotel?.travelpayouts_id || hotelId
+    links.push({
+      hotel_id: hotel?.id || hotelId,
+      travelpayouts_id: travelpayoutsId,
+      hotel_name: hotel?.name || null,
+      provider: 'travelpayouts',
+      affiliate_link: hotel?.affiliate_link || buildAffiliateLink(travelpayoutsId, TRAVELPAYOUTS_MARKER),
+      source: hotel ? 'd1_cache' : 'marker_generated'
+    })
+  }
+
+  return { links, warnings }
+}
+
+async function mcpGetMapMarkers(env: CloudflareBindings, input: any) {
+  const limit = clampNumber(input.limit || 100, 1, 200)
+  const bindings: any[] = []
+  let query = `
+    SELECT id, travelpayouts_id, name, city, price, currency,
+           latitude, longitude, stars, rating, has_parking, image_url, affiliate_link
+    FROM hotel_cache
+    WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND price IS NOT NULL
+  `
+
+  if (input.bounds) {
+    const parts = String(input.bounds).split(',').map((value) => Number(value.trim()))
+    if (parts.length === 4 && parts.every(Number.isFinite)) {
+      const [swLat, swLon, neLat, neLon] = parts
+      query += ' AND latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?'
+      bindings.push(swLat, neLat, swLon, neLon)
+    }
+  }
+
+  query += ' ORDER BY rating DESC LIMIT ?'
+  bindings.push(limit)
+
+  const { results, warning } = await safeAll<any>(env, query, bindings)
+  return {
+    type: 'FeatureCollection',
+    source: 'd1_cache',
+    features: results.map((hotel: any) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [hotel.longitude, hotel.latitude] },
+      properties: {
+        id: hotel.id,
+        travelpayouts_id: hotel.travelpayouts_id,
+        name: hotel.name,
+        city: hotel.city,
+        price: hotel.price,
+        currency: hotel.currency,
+        stars: hotel.stars,
+        rating: hotel.rating,
+        has_parking: !!hotel.has_parking,
+        image: hotel.image_url,
+        affiliate_link: hotel.affiliate_link
+      }
+    })),
+    warnings: warning ? [warning] : results.length === 0 ? ['No real geocoded cached hotels found. No coordinates were invented.'] : []
+  }
+}
+
+async function mcpTrackAffiliateClick(env: CloudflareBindings, input: any) {
+  const hotelId = String(input.hotel_id || '').trim()
+  if (!hotelId) throw httpError(400, 'hotel_id is required')
+
+  const warnings: string[] = []
+  const hotel = await safeFirst<any>(
+    env,
+    'SELECT id, travelpayouts_id, name, affiliate_link FROM hotel_cache WHERE id = ? OR travelpayouts_id = ? LIMIT 1',
+    [hotelId, hotelId],
+    warnings
+  )
+  const travelpayoutsId = hotel?.travelpayouts_id || hotelId
+
+  return {
+    tracking_status: 'dry_run_not_recorded',
+    source: input.source || 'travel-itinerary-ecco',
+    hotel_id: hotel?.id || hotelId,
+    travelpayouts_id: travelpayoutsId,
+    hotel_name: hotel?.name || null,
+    affiliate_link: hotel?.affiliate_link || buildAffiliateLink(travelpayoutsId, TRAVELPAYOUTS_MARKER),
+    warnings: [...warnings, 'Phase 1 does not write booking/click records through MCP. Use the app booking flow for real tracking.']
+  }
+}
+
+async function searchCachedHotels(env: CloudflareBindings, location: string, limit: number) {
+  const filter = `%${location.toLowerCase()}%`
+  const { results } = await safeAll<any>(env, `
+    SELECT * FROM hotel_cache
+    WHERE LOWER(city) LIKE ? OR LOWER(location) LIKE ? OR LOWER(country) LIKE ?
+    ORDER BY rating DESC, price ASC
+    LIMIT ?
+  `, [filter, filter, filter, limit])
+  return results
+}
+
+async function safeAll<T>(env: CloudflareBindings, sql: string, bindings: any[]) {
+  try {
+    const { results } = await env.DB.prepare(sql).bind(...bindings).all<T>()
+    return { results, warning: null as string | null }
+  } catch (error: any) {
+    const message = error?.message || 'D1 query failed'
+    return { results: [] as T[], warning: `D1 hotel cache unavailable: ${message}` }
+  }
+}
+
+async function safeFirst<T>(env: CloudflareBindings, sql: string, bindings: any[], warnings: string[]) {
+  try {
+    return await env.DB.prepare(sql).bind(...bindings).first<T>()
+  } catch (error: any) {
+    warnings.push(`D1 hotel cache unavailable: ${error?.message || 'query failed'}`)
+    return null
+  }
+}
+
+function toMcpHotel(hotel: any) {
+  return {
+    id: hotel.id || null,
+    travelpayouts_id: hotel.travelpayouts_id,
+    name: hotel.name,
+    location: hotel.location,
+    city: hotel.city,
+    country: hotel.country,
+    stars: hotel.stars,
+    rating: hotel.rating,
+    review_count: hotel.review_count,
+    price: hotel.price,
+    currency: hotel.currency,
+    latitude: hotel.latitude,
+    longitude: hotel.longitude,
+    affiliate_link: hotel.affiliate_link,
+    amenities: parseJson(hotel.amenities, []),
+    source_truth: 'travelpayouts_or_d1_cache'
+  }
+}
+
+function clampNumber(value: any, min: number, max: number) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return min
+  return Math.max(min, Math.min(max, Math.floor(number)))
+}
+
+function parseJson(value: any, fallback: any) {
+  if (!value || typeof value !== 'string') return fallback
+  try {
+    return JSON.parse(value)
+  } catch {
+    return fallback
+  }
+}
+
+function httpError(status: number, message: string) {
+  const error = new Error(message) as Error & { status: number }
+  error.status = status
+  return error
+}
+
 app.get('/health', (c) => c.json({ ok: true, status: 'ok', service: 'travel-payout-hotels', version: '1.0.0' }))
 
 app.get('/api/status', (c) => c.json({

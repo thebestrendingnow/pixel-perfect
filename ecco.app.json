@@ -1,0 +1,47 @@
+{
+  "$schema": "https://ecco.local/schemas/ecco.app.schema.json",
+  "schema_version": "1.0.0",
+  "name": "Pixel Perfect Hotel Finder",
+  "slug": "pixel-perfect",
+  "owner": "thebestrendingnow",
+  "repo": "pixel-perfect",
+  "full_name": "thebestrendingnow/pixel-perfect",
+  "classification": "hotel_affiliate_app",
+  "phase": "phase_1",
+  "role": "hotel_affiliate_source_of_truth",
+  "description": "Cloudflare Pages hotel affiliate app for real Travelpayouts search, cached hotel data, affiliate links, and map markers.",
+  "github_url": "https://github.com/thebestrendingnow/pixel-perfect",
+  "runtime": {
+    "platform": "cloudflare_pages",
+    "framework": "hono",
+    "language": "typescript",
+    "database": "cloudflare_d1",
+    "storage": "cloudflare_r2"
+  },
+  "mcp": {
+    "enabled": true,
+    "visibility": "private",
+    "auth": "bearer_private_gateway_token",
+    "manifest_path": "/mcp/manifest",
+    "tools_path": "/mcp/tools",
+    "call_path": "/mcp/call",
+    "tools": [
+      "hotels.search_hotels",
+      "hotels.get_affiliate_links",
+      "hotels.get_map_markers",
+      "hotels.track_affiliate_click"
+    ]
+  },
+  "data_sources": [
+    "travelpayouts_api",
+    "hotel_cache"
+  ],
+  "safety": {
+    "read_generate_only": true,
+    "payments_connected_through_mcp": false,
+    "admin_routes_exposed_to_mcp": false,
+    "ingest_route_exposed_to_mcp": false,
+    "simulated_provider_prices_allowed": false,
+    "click_tracking_mode": "dry_run_not_recorded"
+  }
+}

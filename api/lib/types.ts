@@ -184,6 +184,7 @@ export type CloudflareBindings = {
   GOOGLE_PLACES_API_KEY: string
   AMADEUS_CLIENT_ID: string
   AMADEUS_CLIENT_SECRET: string
+  PRIVATE_GATEWAY_TOKEN?: string
   // White-label env vars (all optional — have defaults)
   SITE_NAME: string
   SITE_TAGLINE: string

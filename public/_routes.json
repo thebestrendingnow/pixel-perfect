@@ -1,1 +1,1 @@
-{"version":1,"include":["/api/*","/health","/openapi.json"],"exclude":[]}
+{"version":1,"include":["/api/*","/mcp/*","/health","/openapi.json"],"exclude":[]}
